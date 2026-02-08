@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            background: #f4f4f4;
+        }
+        .header {
+            background: #0066cc;
+            color: white;
+            padding: 20px;
+        }
+        .header h1 {
+            margin: 0 0 5px 0;
+            font-size: 24px;
+        }
+        .header p {
+            margin: 0;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .content {
+            padding: 20px;
+        }
+        .section-title {
+            font-size: 20px;
+            margin: 25px 0 5px 0;
+        }
+        .section-subtitle {
+            color: #666;
+            font-size: 14px;
+            margin: 0 0 15px 0;
+        }
+        .signal {
+            padding: 15px;
+            margin: 15px 0;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .signal.hot {
+            border-left: 4px solid #ff6b35;
+        }
+        .signal.warm {
+            border-left: 4px solid #ffa500;
+        }
+        .signal h3 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+            color: #333;
+        }
+        .stat {
+            display: inline-block;
+            background: #e8f4f8;
+            padding: 6px 12px;
+            margin: 3px 5px 3px 0;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #333;
+        }
+        .signal ul {
+            padding-left: 20px;
+            margin: 10px 0;
+        }
+        .signal li {
+            margin: 4px 0;
+            font-size: 14px;
+        }
+        .signal p {
+            margin: 8px 0;
+            font-size: 14px;
+        }
+        .signal strong {
+            color: #333;
+        }
+        .why-now {
+            background: #fff8e1;
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 30px 0;
+        }
+        .stats-section {
+            background: #f0f7ff;
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .stats-section h2 {
+            margin-top: 0;
+            font-size: 18px;
+        }
+        .stats-section ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .stats-section li {
+            padding: 4px 0;
+            font-size: 14px;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Weekly HR Hiring Report</h1>
+        <p>{{ week_range }}</p>
+    </div>
+
+    <div class="content">
+        {# ── HOT SIGNALS ──────────────────────────────────────── #}
+        <h2 class="section-title">HOT SIGNALS ({{ hot_signals | length }} companies)</h2>
+        <p class="section-subtitle">Companies with 3+ HR hires in 30 days &mdash; perfect timing for outreach</p>
+
+        {% for signal in hot_signals %}
+        <div class="signal hot">
+            <h3>{{ signal.company_name }}</h3>
+            <div class="stat">Score: {{ signal.final_score }}/100</div>
+            <div class="stat">{{ signal.posting_count_30d }} postings in 30 days</div>
+            {% if signal.headcount_poland %}
+            <div class="stat">{{ signal.headcount_poland }} employees (Poland)</div>
+            {% endif %}
+
+            {% if signal.recent_postings %}
+            <p><strong>Recent Hires:</strong></p>
+            <ul>
+                {% for posting in signal.recent_postings %}
+                <li>{{ posting.job_title }} &mdash; Posted {{ posting.days_ago }} days ago{% if posting.has_wellbeing_kw %} *{% endif %}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+
+            {% if signal.why_now %}
+            <div class="why-now">
+                <strong>Why Now:</strong> {{ signal.why_now }}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        {% if not hot_signals %}
+        <p style="color: #999; font-style: italic;">No hot signals detected this week.</p>
+        {% endif %}
+
+        <hr>
+
+        {# ── WARM SIGNALS ─────────────────────────────────────── #}
+        <h2 class="section-title">WARM SIGNALS ({{ warm_signals | length }} companies)</h2>
+        <p class="section-subtitle">Companies with 2 HR hires in 30 days &mdash; worth monitoring</p>
+
+        {% for signal in warm_signals %}
+        <div class="signal warm">
+            <h3>{{ signal.company_name }}</h3>
+            <div class="stat">Score: {{ signal.final_score }}/100</div>
+            <div class="stat">{{ signal.posting_count_30d }} postings in 30 days</div>
+            {% if signal.headcount_poland %}
+            <div class="stat">{{ signal.headcount_poland }} employees (Poland)</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        {% if not warm_signals %}
+        <p style="color: #999; font-style: italic;">No warm signals detected this week.</p>
+        {% endif %}
+
+        <hr>
+
+        {# ── STATS ────────────────────────────────────────────── #}
+        <div class="stats-section">
+            <h2>This Week's Stats</h2>
+            <ul>
+                <li>Total HR postings monitored: {{ stats.total_postings }}</li>
+                <li>New companies hiring: {{ stats.new_companies }}</li>
+                <li>ICP matches: {{ stats.icp_matches }}</li>
+                <li>Hot signals: {{ stats.hot_count }}</li>
+                <li>Warm signals: {{ stats.warm_count }}</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>Polish Job Market Alerter &mdash; Automated weekly report</p>
+    </div>
+</body>
+</html>

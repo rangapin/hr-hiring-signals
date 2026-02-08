@@ -1,0 +1,23 @@
+steps:
+  - name: hr_alerter.steps.db_init
+    comment: Initialize database connection and schema
+
+  - name: hr_alerter.steps.score_companies
+    comment: Score all companies with recent postings
+
+  - name: hr_alerter.steps.generate_report
+    comment: Generate weekly HTML report
+
+  - name: hr_alerter.steps.send_email
+    comment: Send the report via email (graceful failure if SMTP not configured)
+    swallow: true
+
+on_success:
+  - name: pypyr.steps.echo
+    in:
+      echoMe: "Weekly report pipeline completed successfully."
+
+on_failure:
+  - name: pypyr.steps.echo
+    in:
+      echoMe: "Weekly report pipeline failed. Check logs for details."

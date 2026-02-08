@@ -1,0 +1,469 @@
+{
+  "project": {
+    "name": "hr-alerter",
+    "description": "PyPI package that monitors Polish job boards for HR hiring activity and generates weekly lead reports for Lyra Polska",
+    "version": "0.1.0",
+    "python_requires": ">=3.10",
+    "demo_deadline": "2026-02-13",
+    "spec_file": "docs.md"
+  },
+
+  "target_structure": {
+    "description": "Final package layout all agents build toward",
+    "tree": [
+      "src/hr_alerter/__init__.py",
+      "src/hr_alerter/cli.py",
+      "src/hr_alerter/db/__init__.py",
+      "src/hr_alerter/db/manager.py",
+      "src/hr_alerter/db/schema.sql",
+      "src/hr_alerter/scrapers/__init__.py",
+      "src/hr_alerter/scrapers/base.py",
+      "src/hr_alerter/scrapers/pracuj.py",
+      "src/hr_alerter/scrapers/nofluff.py",
+      "src/hr_alerter/scrapers/utils.py",
+      "src/hr_alerter/scoring/__init__.py",
+      "src/hr_alerter/scoring/velocity.py",
+      "src/hr_alerter/scoring/seniority.py",
+      "src/hr_alerter/scoring/icp.py",
+      "src/hr_alerter/scoring/content.py",
+      "src/hr_alerter/scoring/recency.py",
+      "src/hr_alerter/scoring/composite.py",
+      "src/hr_alerter/reporting/__init__.py",
+      "src/hr_alerter/reporting/composer.py",
+      "src/hr_alerter/reporting/sender.py",
+      "src/hr_alerter/reporting/templates/weekly_report.html",
+      "src/hr_alerter/pipelines/daily_scrape.yaml",
+      "src/hr_alerter/pipelines/weekly_report.yaml",
+      "src/hr_alerter/steps/__init__.py",
+      "src/hr_alerter/steps/db_init.py",
+      "src/hr_alerter/steps/scrape_pracuj.py",
+      "src/hr_alerter/steps/scrape_nofluff.py",
+      "src/hr_alerter/steps/normalize_companies.py",
+      "src/hr_alerter/steps/score_companies.py",
+      "src/hr_alerter/steps/generate_report.py",
+      "src/hr_alerter/steps/send_email.py",
+      "src/hr_alerter/steps/show_summary.py",
+      "tests/__init__.py",
+      "tests/conftest.py",
+      "tests/test_db.py",
+      "tests/test_scrapers.py",
+      "tests/test_scoring.py",
+      "tests/test_reporting.py",
+      "tests/test_cli.py",
+      "pyproject.toml",
+      ".env.example",
+      ".gitignore"
+    ]
+  },
+
+  "shared_contracts": {
+    "description": "Data structures and interfaces all agents must agree on. Each agent reads from and writes to these exact shapes.",
+
+    "job_posting_dict": {
+      "description": "Dict returned by every scraper, inserted by db agent",
+      "fields": {
+        "source": "str — 'pracuj.pl' | 'nofluffjobs'",
+        "job_url": "str — unique, full URL",
+        "job_title": "str",
+        "company_name_raw": "str — as-scraped, before normalization",
+        "location": "str | None — city name(s), comma-separated",
+        "post_date": "str | None — ISO format YYYY-MM-DD",
+        "job_description": "str | None — full JD text if available",
+        "seniority_level": "str | None — 'junior','mid','senior','director','c-level'",
+        "employment_type": "str | None — 'full-time','contract','part-time'"
+      }
+    },
+
+    "score_result_dict": {
+      "description": "Dict returned by composite scorer for each company",
+      "fields": {
+        "company_id": "int",
+        "final_score": "int — 0-100",
+        "lead_temperature": "str — 'hot' | 'warm' | 'cold'",
+        "velocity": "int — 0-40",
+        "seniority": "int — 0-20",
+        "icp": "int — 0-20",
+        "content": "int — 0-10",
+        "recency": "int — 0-10",
+        "posting_count_7d": "int",
+        "posting_count_30d": "int",
+        "has_director_role": "bool",
+        "has_wellbeing_keywords": "bool",
+        "multi_city_expansion": "bool"
+      }
+    },
+
+    "db_tables": [
+      "job_postings",
+      "companies",
+      "contacts",
+      "signals",
+      "reports",
+      "excluded_customers"
+    ]
+  },
+
+  "agents": [
+    {
+      "id": "agent-db",
+      "name": "Database Agent",
+      "role": "Owns all SQLite schema, connection management, and query helpers",
+      "parallel_group": "A",
+      "depends_on": [],
+
+      "context": [
+        "Read docs.md Section 3 (Data Schema) for all 6 CREATE TABLE statements",
+        "Read docs.md Section 3.3 for sample queries to implement as helper methods",
+        "Database path: resolved from config, default ./data/hr_alerter.db",
+        "Use sqlite3 stdlib only — no ORM, no SQLAlchemy",
+        "All methods take a connection object, do not manage global state"
+      ],
+
+      "files_owned": [
+        "src/hr_alerter/db/__init__.py",
+        "src/hr_alerter/db/manager.py",
+        "src/hr_alerter/db/schema.sql",
+        "src/hr_alerter/steps/db_init.py",
+        "tests/test_db.py"
+      ],
+
+      "deliverables": [
+        "schema.sql with all 6 tables from docs.md Section 3.2 (job_postings, companies, contacts, signals, reports, excluded_customers) — use CREATE TABLE IF NOT EXISTS, CREATE INDEX IF NOT EXISTS",
+        "manager.py with: get_connection(db_path) -> conn, init_db(conn), insert_jobs(conn, jobs: list[dict]) -> int (returns inserted count, uses INSERT OR IGNORE), insert_or_update_company(conn, name_normalized, **fields), get_companies_with_postings(conn, min_postings, days) -> list[Row], get_postings_for_company(conn, company_id, days) -> list[Row], get_hot_companies(conn, min_score) -> list[Row], save_signal(conn, signal_dict), save_report(conn, report_dict), get_job_count(conn) -> int",
+        "steps/db_init.py: pypyr step that reads db_path from context, calls init_db, stores conn in context",
+        "tests/test_db.py: test insert_jobs deduplication, test get_companies_with_postings, test schema creation on fresh db. Use in-memory :memory: SQLite for tests"
+      ],
+
+      "acceptance_criteria": [
+        "All 6 tables created with correct columns and indexes",
+        "insert_jobs handles duplicates via INSERT OR IGNORE on job_url",
+        "get_companies_with_postings correctly groups and counts by company_name_raw",
+        "Tests pass with pytest"
+      ]
+    },
+
+    {
+      "id": "agent-pracuj",
+      "name": "Pracuj.pl Scraper Agent",
+      "role": "Scrapes Pracuj.pl job board, extracts structured job data",
+      "parallel_group": "A",
+      "depends_on": [],
+
+      "context": [
+        "Read docs.md Section 4.1 (Pracuj.pl) for URL pattern, selectors, sample code",
+        "Read docs.md Section 4.2 for keyword list",
+        "Read docs.md Section 4.3 for anti-scraping best practices",
+        "Read docs.md Section 4.4 for company name normalization and date parsing",
+        "URL pattern: https://www.pracuj.pl/praca?q={keyword}&pn={page}",
+        "Primary strategy: parse embedded JSON (__NEXT_DATA__ or application/json script tags)",
+        "Fallback strategy: parse HTML with BeautifulSoup (selectors may change)",
+        "Rate limit: random 2-4 second delay between requests",
+        "Rotate User-Agent headers from a list of 3+",
+        "Use html.parser (not lxml) to avoid C build dependency on Windows"
+      ],
+
+      "files_owned": [
+        "src/hr_alerter/scrapers/__init__.py",
+        "src/hr_alerter/scrapers/base.py",
+        "src/hr_alerter/scrapers/pracuj.py",
+        "src/hr_alerter/scrapers/utils.py",
+        "src/hr_alerter/steps/scrape_pracuj.py",
+        "tests/test_scrapers.py"
+      ],
+
+      "deliverables": [
+        "base.py: BaseScraper abstract class with scrape(keywords, max_pages) -> list[dict] interface, shared get_headers() method with UA rotation, shared rate_limit_delay(min_sec, max_sec) method",
+        "utils.py: normalize_company_name(raw) -> str (strips Sp. z o.o., S.A., etc), parse_polish_date(date_str) -> date|None (handles dzisiaj/wczoraj/X dni temu/ISO/dd.mm.yyyy), detect_seniority(title) -> str|None (maps title keywords to junior/mid/senior/director/c-level)",
+        "pracuj.py: PracujScraper(BaseScraper) with _parse_json(soup) and _parse_html(soup) strategies. Returns list[job_posting_dict] per shared_contracts",
+        "steps/scrape_pracuj.py: pypyr step reading keywords, max_pages, user_agents from context, outputs scraped_jobs list to context",
+        "tests/test_scrapers.py: test normalize_company_name (5 cases from docs), test parse_polish_date (dzisiaj, wczoraj, 3 dni temu, ISO, dd.mm.yyyy), test detect_seniority"
+      ],
+
+      "acceptance_criteria": [
+        "PracujScraper.scrape('HR', max_pages=1) returns list of dicts matching job_posting_dict contract",
+        "Each dict has non-null source, job_url, job_title, company_name_raw",
+        "Rate limiting: minimum 2s between HTTP requests",
+        "Graceful error handling: network errors logged, scraping continues",
+        "normalize_company_name handles all suffixes from docs.md Section 4.4",
+        "Unit tests pass without network access (test utils only)"
+      ]
+    },
+
+    {
+      "id": "agent-nofluff",
+      "name": "NoFluffJobs Scraper Agent",
+      "role": "Scrapes NoFluffJobs using Playwright for JS-rendered pages",
+      "parallel_group": "A",
+      "depends_on": [],
+
+      "context": [
+        "Read docs.md Section 4.1 (NoFluffJobs) for URL pattern and selectors",
+        "URL pattern: https://nofluffjobs.com/pl/jobs/hr?page={page}",
+        "This site is JavaScript-rendered — BeautifulSoup alone won't work",
+        "Use playwright for browser automation",
+        "Import BaseScraper from hr_alerter.scrapers.base (built by agent-pracuj)",
+        "Import utils from hr_alerter.scrapers.utils (built by agent-pracuj)",
+        "Rate limit: 1 request/2 seconds",
+        "Selectors from docs: a.posting-list-item, h3.posting-title__position, span.posting-title__company-name"
+      ],
+
+      "files_owned": [
+        "src/hr_alerter/scrapers/nofluff.py",
+        "src/hr_alerter/steps/scrape_nofluff.py"
+      ],
+
+      "deliverables": [
+        "nofluff.py: NoFluffScraper(BaseScraper) using playwright.sync_api to render pages. Extracts job_title, company_name_raw, location, job_url. Returns list[job_posting_dict]. Handles: browser launch/close in context manager, page wait_for_selector with timeout, graceful failure per page",
+        "steps/scrape_nofluff.py: pypyr step, reads max_pages from context, outputs scraped_jobs_nofluff to context"
+      ],
+
+      "acceptance_criteria": [
+        "NoFluffScraper.scrape(max_pages=1) returns list of dicts matching job_posting_dict contract",
+        "Browser is always closed even on error (context manager or try/finally)",
+        "Rate limiting between page loads",
+        "Returns empty list (not crash) if site is down or selectors change"
+      ]
+    },
+
+    {
+      "id": "agent-scoring",
+      "name": "Scoring Engine Agent",
+      "role": "Implements the 5-dimension scoring algorithm from docs.md Section 6",
+      "parallel_group": "A",
+      "depends_on": [],
+
+      "context": [
+        "Read docs.md Section 6 (entire section) for all scoring logic",
+        "5 dimensions: Velocity (40pts), Seniority (20pts), ICP Fit (20pts), Content (10pts), Recency (10pts)",
+        "Total score 0-100, classified as hot (>=75), warm (>=50), cold (<50)",
+        "Each scorer takes a company_id and a db connection, queries job_postings table",
+        "Read docs.md Section 6.2-6.7 for exact threshold values and scoring rules",
+        "Read docs.md Section 6.8 for worked examples to validate against",
+        "Wellbeing keywords (Polish+English): wellbeing, dobrostan, mental health, zdrowie psychiczne",
+        "EAP keywords: EAP, employee assistance, wsparcie pracownikow",
+        "Culture keywords: kultura organizacyjna, employer branding, employee experience"
+      ],
+
+      "files_owned": [
+        "src/hr_alerter/scoring/__init__.py",
+        "src/hr_alerter/scoring/velocity.py",
+        "src/hr_alerter/scoring/seniority.py",
+        "src/hr_alerter/scoring/icp.py",
+        "src/hr_alerter/scoring/content.py",
+        "src/hr_alerter/scoring/recency.py",
+        "src/hr_alerter/scoring/composite.py",
+        "src/hr_alerter/steps/score_companies.py",
+        "src/hr_alerter/steps/normalize_companies.py",
+        "tests/test_scoring.py"
+      ],
+
+      "deliverables": [
+        "velocity.py: calculate_velocity_score(conn, company_id) -> int. Thresholds: 7d>=3 -> 40, 30d>=5 -> 35, 30d>=3 -> 30, 30d>=2 -> 20, 90d>=2 -> 10, else 0",
+        "seniority.py: calculate_seniority_score(conn, company_id) -> int. Director +15, Senior +5, multiple levels +5. Max 20",
+        "icp.py: calculate_icp_score(conn, company_id) -> int. Headcount 200-5000 +15, 5001-10000 +10. Target title matches +5. Max 20",
+        "content.py: calculate_content_score(conn, company_id) -> int. Wellbeing kw +5, EAP kw +3, Culture kw +2. Max 10",
+        "recency.py: calculate_recency_score(conn, company_id) -> int. <=3d +10, <=7d +8, <=14d +5, <=30d +3, else 0",
+        "composite.py: calculate_final_score(conn, company_id) -> score_result_dict. Sums all 5, classifies temperature, returns full breakdown",
+        "steps/normalize_companies.py: pypyr step that creates/updates companies table from raw company names in job_postings, using normalize_company_name from scrapers.utils",
+        "steps/score_companies.py: pypyr step that scores all companies with 2+ postings in 30 days, saves signals to DB",
+        "tests/test_scoring.py: test each scorer with mock data matching docs.md Section 6.8 examples (Samsung=83 HOT, Small Startup=25 COLD)"
+      ],
+
+      "acceptance_criteria": [
+        "Samsung example from docs scores 83 (hot)",
+        "Small startup example from docs scores 25 (cold)",
+        "Each individual scorer returns value within its max range",
+        "composite.py returns dict matching score_result_dict contract",
+        "Tests pass using in-memory SQLite with seeded test data"
+      ]
+    },
+
+    {
+      "id": "agent-email",
+      "name": "Email & Reporting Agent",
+      "role": "Builds HTML email reports and sends via SMTP",
+      "parallel_group": "A",
+      "depends_on": [],
+
+      "context": [
+        "Read docs.md Section 7.1 for HTML email template (full markup provided)",
+        "Read docs.md Section 7.2 for SMTP sending code",
+        "Subject line format: 'X Companies Scaling HR Teams This Week | Polish Job Market Alerter'",
+        "Report sections: HOT signals (3+ postings/30d), WARM signals (2 postings/30d), weekly stats",
+        "Each signal card shows: company name, score, posting count, employee count, recent hires list, 'Why Now' paragraph",
+        "SMTP config from environment: SMTP_EMAIL, SMTP_PASSWORD, SMTP_HOST (default smtp.gmail.com), SMTP_PORT (default 465)",
+        "Recipient email from config or CLI arg",
+        "Use stdlib smtplib + email.mime — no SendGrid dependency for MVP"
+      ],
+
+      "files_owned": [
+        "src/hr_alerter/reporting/__init__.py",
+        "src/hr_alerter/reporting/composer.py",
+        "src/hr_alerter/reporting/sender.py",
+        "src/hr_alerter/reporting/templates/weekly_report.html",
+        "src/hr_alerter/steps/generate_report.py",
+        "src/hr_alerter/steps/send_email.py",
+        "tests/test_reporting.py"
+      ],
+
+      "deliverables": [
+        "templates/weekly_report.html: Jinja2-style HTML template matching docs.md Section 7.1 design. Slots for: week_range, hot_signals list, warm_signals list, stats dict",
+        "composer.py: compose_weekly_report(conn, week_start, week_end) -> dict with keys: subject (str), html_body (str), hot_count (int), warm_count (int). Queries signals+companies tables, renders HTML template",
+        "sender.py: send_email(recipient, subject, html_body) -> bool. Uses SMTP_EMAIL, SMTP_PASSWORD, SMTP_HOST, SMTP_PORT from os.environ. Returns True on success, logs errors",
+        "steps/generate_report.py: pypyr step that calls composer, stores report dict in context and saves to reports table",
+        "steps/send_email.py: pypyr step that calls sender with report from context, updates reports.sent_at on success",
+        "tests/test_reporting.py: test compose_weekly_report produces valid HTML with hot/warm sections, test subject line format, test sender handles missing env vars gracefully"
+      ],
+
+      "acceptance_criteria": [
+        "Generated HTML renders correctly in browser with hot/warm signal cards",
+        "Email sends successfully via Gmail SMTP when env vars are set",
+        "Graceful failure with clear error message when SMTP credentials missing",
+        "Report saved to reports table in DB"
+      ]
+    },
+
+    {
+      "id": "agent-packaging",
+      "name": "CLI & Packaging Agent",
+      "role": "Creates pyproject.toml, Click CLI, pypyr pipeline YAML, and package plumbing",
+      "parallel_group": "A",
+      "depends_on": [],
+
+      "context": [
+        "Package name: hr-alerter, import as hr_alerter",
+        "CLI framework: Click",
+        "Pipeline framework: pypyr",
+        "CLI entry point: hr-alerter (console_scripts in pyproject.toml)",
+        "Commands: hr-alerter scrape [--pages N] [--keyword K], hr-alerter score, hr-alerter report [--recipient EMAIL], hr-alerter pipeline daily, hr-alerter pipeline weekly",
+        "The 'pipeline' commands invoke pypyr programmatically via pypyr.pipelinerunner",
+        "Two pypyr pipelines: daily_scrape.yaml (init -> scrape pracuj -> scrape nofluff -> normalize -> save -> summary), weekly_report.yaml (init -> score -> generate report -> send email)",
+        "Config via .env file loaded with python-dotenv, and config/settings.yaml loaded by pypyr fetchyaml",
+        "Dependencies: click, pypyr, requests, beautifulsoup4, playwright, python-dotenv, jinja2"
+      ],
+
+      "files_owned": [
+        "pyproject.toml",
+        "src/hr_alerter/__init__.py",
+        "src/hr_alerter/cli.py",
+        "src/hr_alerter/pipelines/daily_scrape.yaml",
+        "src/hr_alerter/pipelines/weekly_report.yaml",
+        "src/hr_alerter/steps/__init__.py",
+        "src/hr_alerter/steps/show_summary.py",
+        ".env.example",
+        ".gitignore",
+        "tests/__init__.py",
+        "tests/test_cli.py"
+      ],
+
+      "deliverables": [
+        "pyproject.toml: [build-system] hatchling, [project] name=hr-alerter version=0.1.0 python>=3.10, dependencies=[click,pypyr,requests,beautifulsoup4,playwright,python-dotenv,jinja2], [project.scripts] hr-alerter=hr_alerter.cli:main, [tool.pytest.ini_options] testpaths=['tests']",
+        "src/hr_alerter/__init__.py: __version__ = '0.1.0', DB_PATH default, CONFIG_PATH default",
+        "cli.py: Click group 'main' with commands: scrape (--pages, --keyword), score, report (--recipient), pipeline (daily/weekly). Each command loads .env, resolves DB path, calls appropriate module or invokes pypyr pipeline",
+        "pipelines/daily_scrape.yaml: context_parser keyvaluepairs, steps: default max_pages=1, fetchyaml config, db_init, scrape_pracuj, scrape_nofluff (swallow=True for graceful fail), normalize_companies, show_summary. on_failure echo",
+        "pipelines/weekly_report.yaml: steps: fetchyaml config, db_init, score_companies, generate_report, send_email (swallow=True). on_failure echo",
+        "steps/show_summary.py: pypyr step printing job count, top companies, scraping stats",
+        ".env.example: SMTP_EMAIL, SMTP_PASSWORD, SMTP_HOST, SMTP_PORT, CLAY_API_KEY, RECIPIENT_EMAIL with placeholder values",
+        ".gitignore: data/*.db, .env, __pycache__, dist/, *.egg-info, .venv/",
+        "tests/test_cli.py: test CLI --help works, test scrape command invocation with CliRunner"
+      ],
+
+      "acceptance_criteria": [
+        "pip install -e . succeeds and creates hr-alerter command",
+        "hr-alerter --help shows all commands",
+        "hr-alerter scrape --pages 1 runs the scraping pipeline end to end",
+        "hr-alerter pipeline daily invokes pypyr with daily_scrape.yaml",
+        "pyproject.toml has correct metadata and all dependencies listed"
+      ]
+    },
+
+    {
+      "id": "agent-coordinator",
+      "name": "Coordinator & Integration Agent",
+      "role": "Integrates all agent outputs, writes conftest.py, validates end-to-end, fixes import issues",
+      "parallel_group": "B",
+      "depends_on": [
+        "agent-db",
+        "agent-pracuj",
+        "agent-nofluff",
+        "agent-scoring",
+        "agent-email",
+        "agent-packaging"
+      ],
+
+      "context": [
+        "This agent runs AFTER all parallel agents complete",
+        "Read all files created by other agents",
+        "Fix any import path issues between modules",
+        "Ensure pypyr steps can find each other (correct module paths in YAML)",
+        "Ensure CLI commands correctly wire to pipeline steps",
+        "Verify shared_contracts are respected across all modules",
+        "Run full test suite with pytest",
+        "Run pip install -e . and test CLI commands"
+      ],
+
+      "files_owned": [
+        "tests/conftest.py"
+      ],
+
+      "tasks": [
+        "1. Read every file created by the 6 parallel agents",
+        "2. Fix import paths: ensure all 'from hr_alerter.X import Y' statements resolve correctly",
+        "3. Fix pypyr pipeline YAML: ensure step names match actual module paths (e.g., hr_alerter.steps.db_init not steps.db_init)",
+        "4. Write tests/conftest.py with shared fixtures: tmp_db (in-memory SQLite with schema applied), sample_jobs (list of 10 job_posting_dicts), sample_company (company with known scoring data)",
+        "5. Run pytest — fix any failures",
+        "6. Run pip install -e . — fix any packaging errors",
+        "7. Run hr-alerter --help — verify CLI works",
+        "8. Run hr-alerter scrape --pages 1 — verify end-to-end scraping",
+        "9. Verify data landed in SQLite database",
+        "10. Update CLAUDE.md with final architecture and run instructions"
+      ],
+
+      "acceptance_criteria": [
+        "All imports resolve without errors",
+        "pytest passes with 0 failures",
+        "pip install -e . succeeds",
+        "hr-alerter scrape --pages 1 scrapes real data and stores in DB",
+        "hr-alerter score runs scoring on stored data",
+        "hr-alerter report --recipient test@example.com generates HTML (sending skipped without SMTP creds)",
+        "pypyr daily_scrape pipeline runs end-to-end",
+        "CLAUDE.md reflects final project state"
+      ]
+    }
+  ],
+
+  "execution_plan": {
+    "phase_1_parallel": {
+      "description": "All 6 specialist agents work simultaneously on independent modules",
+      "agents": ["agent-db", "agent-pracuj", "agent-nofluff", "agent-scoring", "agent-email", "agent-packaging"],
+      "estimated_time": "15-20 minutes",
+      "notes": [
+        "These agents have NO dependencies on each other",
+        "They code against the shared_contracts interface, not each other's code",
+        "Each agent writes tests for their own module",
+        "File ownership is exclusive — no two agents write the same file"
+      ]
+    },
+
+    "phase_2_integration": {
+      "description": "Coordinator agent integrates, fixes, and validates everything",
+      "agents": ["agent-coordinator"],
+      "estimated_time": "10-15 minutes",
+      "notes": [
+        "Runs only after ALL phase 1 agents complete",
+        "Has read/write access to all files",
+        "Primary job is fixing import wiring and running end-to-end tests",
+        "Updates CLAUDE.md with final docs"
+      ]
+    }
+  },
+
+  "conventions": {
+    "python_style": "PEP 8, type hints on public functions, docstrings on public classes/functions",
+    "error_handling": "Log errors with logging module, never crash the pipeline — use try/except with continue for scraping loops",
+    "testing": "pytest, use in-memory SQLite for DB tests, no network calls in unit tests",
+    "imports": "Absolute imports only (from hr_alerter.db.manager import ...), no relative imports",
+    "config": "Environment variables for secrets (.env), YAML for non-secret config (settings.yaml)",
+    "html_parser": "Use html.parser (not lxml) to avoid C build dependency on Windows"
+  }
+}

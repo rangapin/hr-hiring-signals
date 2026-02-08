@@ -1,0 +1,44 @@
+context_parser: pypyr.parser.keyvaluepairs
+
+steps:
+  - name: pypyr.steps.default
+    comment: Set default context values
+    in:
+      defaults:
+        max_pages: 1
+        keywords:
+          - "HR"
+          - "kadry"
+          - "People Culture"
+          - "Wellbeing"
+          - "zasoby ludzkie"
+        user_agents:
+          - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+          - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+
+  - name: hr_alerter.steps.db_init
+    comment: Initialize database connection and schema
+
+  - name: hr_alerter.steps.scrape_pracuj
+    comment: Scrape Pracuj.pl for HR job postings
+
+  - name: hr_alerter.steps.scrape_nofluff
+    comment: Scrape NoFluffJobs (graceful failure if Playwright unavailable)
+    swallow: true
+
+  - name: hr_alerter.steps.normalize_companies
+    comment: Normalize company names and update companies table
+
+  - name: hr_alerter.steps.show_summary
+    comment: Print summary of scraped data
+
+on_success:
+  - name: pypyr.steps.echo
+    in:
+      echoMe: "Daily scrape pipeline completed successfully."
+
+on_failure:
+  - name: pypyr.steps.echo
+    in:
+      echoMe: "Daily scrape pipeline failed. Check logs for details."
